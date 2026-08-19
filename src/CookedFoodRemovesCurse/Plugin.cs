@@ -1,39 +1,81 @@
+using System.Linq;
 using BepInEx;
 using BepInEx.Logging;
+using HarmonyLib;
+
+using Photon.Pun;
+
+
 
 namespace CookedFoodRemovesCurse;
 
-// Here are some basic resources on code style and naming conventions to help
-// you in your first CSharp plugin!
-// https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions
-// https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/identifier-names
-// https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/names-of-namespaces
-
-// The BepInAutoPlugin attribute comes from the Hamunii.BepInEx.AutoPlugin
-// NuGet package, and it will generate the BepInPlugin attribute for you!
-// For more info, see https://github.com/Hamunii/BepInEx.AutoPlugin
-
-/// <summary>
-/// The BepInEx plugin class of CookedFoodRemovesCurse.
-/// </summary>
 [BepInAutoPlugin]
 public partial class Plugin : BaseUnityPlugin
 {
     internal static ManualLogSource Log { get; private set; } = null!;
 
+    private Harmony _harmony = null!;
+
     private void Awake()
     {
-        // BepInEx gives us a logger which we can use to log information.
-        // See https://lethal.wiki/dev/fundamentals/logging
         Log = Logger;
 
-        // BepInEx also gives us a config file for easy configuration.
-        // See https://lethal.wiki/dev/intermediate/custom-configs
 
-        // We can apply our hooks here.
-        // See https://lethal.wiki/dev/fundamentals/patching-code
 
-        // Log our awake here so we can see it in LogOutput.log file
+        //patch harmony functions
+        _harmony = new Harmony(Id);
+        _harmony.PatchAll();
         Log.LogInfo($"Plugin {Name} is loaded!");
+    }
+}
+
+[HarmonyPatch(typeof(Item), "Consume")]
+public static class ItemConsumePatch
+{
+    [HarmonyPostfix]
+    public static void PostFix(Item __instance, int consumerID)
+    {
+        var modifyStatusComponents = __instance.GetComponents<Action_ModifyStatus>();
+        bool isFood = false;
+
+        foreach (var comp in modifyStatusComponents)
+        {
+            if (comp.statusType == CharacterAfflictions.STATUSTYPE.Hunger && comp.changeAmount < 0f)
+            {
+                isFood = true;
+                break;
+            }
+        }
+
+        PhotonView pv = PhotonNetwork.GetPhotonView(consumerID);
+        if (pv == null) return;
+
+        Character currCharacter = pv.GetComponent<Character>();
+        if (currCharacter == null) return;
+
+        // Always log full detail, regardless of isFood result
+        string statusList = string.Join(", ", modifyStatusComponents.Select(c => $"{c.statusType}:{c.changeAmount}"));
+        Plugin.Log.LogInfo(
+            $"ItemConsume called. Consumed: {__instance.name} | tags={__instance.itemTags} | " +
+            $"modifyStatusCount={modifyStatusComponents.Length} | statuses=[{statusList}]"
+        );
+
+        if (isFood)
+        {
+            Plugin.Log.LogInfo($"Consumed item {__instance.name} detected as FOOD.");
+            int cookedAmount = __instance.GetData<IntItemData>(DataEntryKey.CookedAmount).Value;
+            if ((cookedAmount == 1) || (cookedAmount == 2))
+            {
+                currCharacter.refs.afflictions.SubtractStatus(statusType: CharacterAfflictions.STATUSTYPE.Curse, amount: .01f, fromRPC: false, decreasedNaturally: false);
+            }
+            else if (cookedAmount == 3)
+            {
+                currCharacter.refs.afflictions.SubtractStatus(statusType: CharacterAfflictions.STATUSTYPE.Curse, amount: .02f, fromRPC: false, decreasedNaturally: false);
+            }
+        }
+        else
+        {
+            Plugin.Log.LogInfo($"Consumed item {__instance.name} detected as NOT FOOD.");
+        }
     }
 }
