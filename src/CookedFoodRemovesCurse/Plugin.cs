@@ -29,53 +29,29 @@ public partial class Plugin : BaseUnityPlugin
     }
 }
 
-[HarmonyPatch(typeof(Item), "Consume")]
-public static class ItemConsumePatch
+[HarmonyPatch(typeof(CharacterAfflictions), "SubtractStatus")]
+public static class HungerSubtractPatch
 {
     [HarmonyPostfix]
-    public static void PostFix(Item __instance, int consumerID)
+    public static void Postfix(CharacterAfflictions __instance, CharacterAfflictions.STATUSTYPE statusType, float amount, bool fromRPC, bool decreasedNaturally)
     {
-        var modifyStatusComponents = __instance.GetComponents<Action_ModifyStatus>();
-        bool isFood = false;
+        if (statusType != CharacterAfflictions.STATUSTYPE.Hunger) return;
+        if (fromRPC) return; // only react to the local, authoritative action, not a network replay
 
-        foreach (var comp in modifyStatusComponents)
+        Character character = __instance.character;
+        Item currentItem = character?.data?.currentItem;
+        if (currentItem == null) return;
+
+        int cookedAmount = currentItem.GetData<IntItemData>(DataEntryKey.CookedAmount).Value;
+        Plugin.Log.LogInfo($"Hunger reduced by {amount} via {currentItem.name} (cookedAmount={cookedAmount})");
+
+        if (cookedAmount == 1 || cookedAmount == 2)
         {
-            if (comp.statusType == CharacterAfflictions.STATUSTYPE.Hunger && comp.changeAmount < 0f)
-            {
-                isFood = true;
-                break;
-            }
+            __instance.SubtractStatus(CharacterAfflictions.STATUSTYPE.Curse, .01f, false, false);
         }
-
-        PhotonView pv = PhotonNetwork.GetPhotonView(consumerID);
-        if (pv == null) return;
-
-        Character currCharacter = pv.GetComponent<Character>();
-        if (currCharacter == null) return;
-
-        // Always log full detail, regardless of isFood result
-        string statusList = string.Join(", ", modifyStatusComponents.Select(c => $"{c.statusType}:{c.changeAmount}"));
-        Plugin.Log.LogInfo(
-            $"ItemConsume called. Consumed: {__instance.name} | tags={__instance.itemTags} | " +
-            $"modifyStatusCount={modifyStatusComponents.Length} | statuses=[{statusList}]"
-        );
-
-        if (isFood)
+        else if (cookedAmount == 3)
         {
-            Plugin.Log.LogInfo($"Consumed item {__instance.name} detected as FOOD.");
-            int cookedAmount = __instance.GetData<IntItemData>(DataEntryKey.CookedAmount).Value;
-            if ((cookedAmount == 1) || (cookedAmount == 2))
-            {
-                currCharacter.refs.afflictions.SubtractStatus(statusType: CharacterAfflictions.STATUSTYPE.Curse, amount: .01f, fromRPC: false, decreasedNaturally: false);
-            }
-            else if (cookedAmount == 3)
-            {
-                currCharacter.refs.afflictions.SubtractStatus(statusType: CharacterAfflictions.STATUSTYPE.Curse, amount: .02f, fromRPC: false, decreasedNaturally: false);
-            }
-        }
-        else
-        {
-            Plugin.Log.LogInfo($"Consumed item {__instance.name} detected as NOT FOOD.");
+            __instance.SubtractStatus(CharacterAfflictions.STATUSTYPE.Curse, .02f, false, false);
         }
     }
 }
