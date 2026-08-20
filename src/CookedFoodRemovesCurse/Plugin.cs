@@ -64,7 +64,21 @@ public partial class Plugin : BaseUnityPlugin
         //patch harmony functions
         _harmony = new Harmony(Id);
         _harmony.PatchAll();
-        Log.LogInfo($"Plugin {Name} loaded, V1.3b");
+        Log.LogInfo($"Plugin {Name} loaded, V1.3c");
+    }
+}
+
+//track current hunger value
+[HarmonyPatch(typeof(CharacterAfflictions), "SubtractStatus")]
+public static class HungerTrackerPatch
+{
+    public static float lastHungerBeforeSubtract = -1f;
+
+    [HarmonyPrefix]
+    public static void Prefix(CharacterAfflictions __instance, CharacterAfflictions.STATUSTYPE statusType)
+    {
+        if (statusType != CharacterAfflictions.STATUSTYPE.Hunger) return;
+        lastHungerBeforeSubtract = __instance.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Hunger);
     }
 }
 
@@ -72,19 +86,10 @@ public partial class Plugin : BaseUnityPlugin
 [HarmonyPatch(typeof(Item), "Consume")]
 public static class ItemConsumePatch
 {
-    [HarmonyPrefix]
-    public static void Prefix(Item __instance, int consumerID, out float __state)
-    {
-        //get hunger value BEFORE food is consumed
-        PhotonView pv = PhotonNetwork.GetPhotonView(consumerID);
-        Character c = pv?.GetComponent<Character>();
-        __state = c != null ? c.refs.afflictions.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Hunger) : -1f;
-    }
-
     [HarmonyPostfix]
-    public static void Postfix(Item __instance, int consumerID, float __state)
+    public static void Postfix(Item __instance, int consumerID)
     {
-        float currentHunger = __state;
+        float currentHunger = HungerTrackerPatch.lastHungerBeforeSubtract;
         bool isFood = __instance.GetComponents<Action_ModifyStatus>()
             .Any(c => c.statusType == CharacterAfflictions.STATUSTYPE.Hunger && c.changeAmount < 0f)
             || __instance.GetComponent<Action_RestoreHunger>() != null;
@@ -101,12 +106,10 @@ public static class ItemConsumePatch
         int cookedAmount = __instance.GetData<IntItemData>(DataEntryKey.CookedAmount).Value;
         Plugin.Log.LogInfo($"Consumed FOOD: {__instance.name} | cookedAmount={cookedAmount}");
 
-        if ( ! Plugin.canOverEat.Value)
+        if ( ! Plugin.canOverEat.Value && currentHunger < 0.025f)
         {
-            if (currentHunger < 0.025f) {
-                Plugin.Log.LogInfo($"Player is not hungry (hunger = {currentHunger}) and canOverEat is FALSE. No curse removal applicable.");
-                return;
-                }
+            Plugin.Log.LogInfo($"Player is not hungry (hunger = {currentHunger}) and canOverEat is FALSE. No curse removal applicable.");
+            return;
         }
         //1 is normal, 2 then 3 is burned
         if (cookedAmount == 1) 
