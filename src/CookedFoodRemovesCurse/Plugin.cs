@@ -69,6 +69,7 @@ public partial class Plugin : BaseUnityPlugin
 }
 
 //track current hunger value
+//needs to be prefix patched onto hunger tracking so that it checks BEFORE the item is consumed (which would immediately remove hunger)
 [HarmonyPatch(typeof(CharacterAfflictions), "SubtractStatus")]
 public static class HungerTrackerPatch
 {
@@ -89,28 +90,35 @@ public static class ItemConsumePatch
     [HarmonyPostfix]
     public static void Postfix(Item __instance, int consumerID)
     {
+        //get item data
         float currentHunger = HungerTrackerPatch.lastHungerBeforeSubtract;
         bool isFood = __instance.GetComponents<Action_ModifyStatus>()
             .Any(c => c.statusType == CharacterAfflictions.STATUSTYPE.Hunger && c.changeAmount < 0f)
             || __instance.GetComponent<Action_RestoreHunger>() != null;
+        int cookedAmount = __instance.GetData<IntItemData>(DataEntryKey.CookedAmount).Value;
 
+        //char data
+        PhotonView pv = PhotonNetwork.GetPhotonView(consumerID);
+        Character currCharacter = pv?.GetComponent<Character>();
+        if (currCharacter == null) {return;}
+
+        //cooked bandaids should not count
         if (!isFood) 
         {
             Plugin.Log.LogInfo($"{__instance.name} detected as NOT FOOD.");
             return;
         }
-        PhotonView pv = PhotonNetwork.GetPhotonView(consumerID);
-        Character currCharacter = pv?.GetComponent<Character>();
-        if (currCharacter == null) {return;}
 
-        int cookedAmount = __instance.GetData<IntItemData>(DataEntryKey.CookedAmount).Value;
+        //actual food consumed
         Plugin.Log.LogInfo($"Consumed FOOD: {__instance.name} | cookedAmount={cookedAmount}");
 
+        //overeat check
         if ( ! Plugin.canOverEat.Value && currentHunger < 0.025f)
         {
             Plugin.Log.LogInfo($"Player is not hungry (hunger = {currentHunger}) and canOverEat is FALSE. No curse removal applicable.");
             return;
         }
+        
         //1 is normal, 2 then 3 is burned
         if (cookedAmount == 1) 
         {
