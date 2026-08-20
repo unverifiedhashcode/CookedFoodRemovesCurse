@@ -17,7 +17,7 @@
     <IsThunderstorePackable>true</IsThunderstorePackable>
     <!-- Package name on Thunderstore. Must not contain spaces ' ' or dashes '-'. -->
     <ThunderstoreName>CookedFoodRemovesCurse</ThunderstoreName>
-    <ThunderstoreDescription>TODO: Fill in short mod description at max 250 characters.</ThunderstoreDescription>
+    <ThunderstoreDescription>Eating cooked food removes a small amount of curse. Helps add some counterplay to curse beyond hoping you get lucky with mythical item drops.</ThunderstoreDescription>
     <!--
       Communities and package categories metadata for publishing with ThunderPipe.
       Communities: https://thunderstore.io/api/experimental/community/
